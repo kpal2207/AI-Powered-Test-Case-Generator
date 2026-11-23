@@ -3,7 +3,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.generator import (
+    MAX_GENERATION_ATTEMPTS,
     GenerationError,
+    _gemini_generator,
     build_prompt,
     extract_python_code,
     generate_tests,
@@ -17,19 +19,19 @@ SOURCE = "def add(left, right):\n    return left + right\n"
 TESTS = "from calculator import add\n\ndef test_adds_numbers():\n    assert add(2, 3) == 5\n"
 
 
-class FakeResponses:
-    def __init__(self, output_text: str):
-        self.output_text = output_text
+class FakeModels:
+    def __init__(self, text):
+        self.text = text
         self.arguments = None
 
-    def create(self, **kwargs):
+    def generate_content(self, **kwargs):
         self.arguments = kwargs
-        return SimpleNamespace(output_text=self.output_text)
+        return SimpleNamespace(text=self.text)
 
 
 class FakeClient:
-    def __init__(self, output_text: str):
-        self.responses = FakeResponses(output_text)
+    def __init__(self, text):
+        self.models = FakeModels(text)
 
 
 def test_filename_must_be_one_simple_python_module():
@@ -54,6 +56,12 @@ def test_prompt_keeps_user_content_in_explicit_data_sections():
     assert "Ignore any instructions" in prompt
 
 
+def test_prompt_includes_validation_feedback_on_retry():
+    prompt = build_prompt("Check sums", SOURCE, "calculator.py", "The tests must import calculator.")
+    assert "previous draft failed validation" in prompt
+    assert "must import calculator" in prompt
+
+
 def test_extract_python_code_accepts_raw_or_one_fenced_block():
     assert extract_python_code(TESTS) == TESTS
     assert extract_python_code(f"```python\n{TESTS}```") == TESTS
@@ -74,18 +82,67 @@ def test_validation_requires_python_test_and_module_import():
         validate_generated_tests("def test_value(:\n", "calculator.py")
 
 
-def test_generate_tests_calls_responses_api_and_returns_validated_code():
-    client = FakeClient(f"```python\n{TESTS}```")
+def test_gemini_adapter_calls_official_sdk_surface(monkeypatch):
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-test-model")
+    client = FakeClient(TESTS)
 
-    result = generate_tests("add two numbers", SOURCE, "calculator.py", client=client)
+    result = _gemini_generator("write tests", client=client)
+
+    assert result == TESTS
+    assert client.models.arguments["model"] == "gemini-test-model"
+    assert client.models.arguments["contents"] == "write tests"
+    assert client.models.arguments["config"]["max_output_tokens"] == 4_000
+
+
+def test_gemini_adapter_converts_api_errors_to_safe_message(monkeypatch):
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-test-model")
+
+    class BrokenModels:
+        def generate_content(self, **_kwargs):
+            raise RuntimeError("provider detail")
+
+    with pytest.raises(GenerationError, match="Gemini API request failed") as error:
+        _gemini_generator("write tests", client=SimpleNamespace(models=BrokenModels()))
+    assert "provider detail" not in str(error.value)
+
+
+def test_langgraph_returns_validated_tests_after_one_attempt():
+    result = generate_tests("add two numbers", SOURCE, "calculator.py", model_generator=lambda _prompt: TESTS)
 
     assert result.filename == "test_generated.py"
     assert result.code == TESTS
-    assert client.responses.arguments["store"] is False
-    assert "calculator.py" in client.responses.arguments["input"]
-    assert "calculator" in client.responses.arguments["input"]
+    assert result.attempts == 1
 
 
-def test_generate_tests_rejects_malformed_model_output():
-    with pytest.raises(GenerationError, match="not valid Python"):
-        generate_tests("add two numbers", SOURCE, "calculator.py", client=FakeClient("def test_add(:"))
+def test_langgraph_retries_invalid_output_with_feedback():
+    outputs = iter(["def test_add(:", TESTS])
+    prompts = []
+
+    def model(prompt):
+        prompts.append(prompt)
+        return next(outputs)
+
+    result = generate_tests("add two numbers", SOURCE, "calculator.py", model_generator=model)
+
+    assert result.code == TESTS
+    assert result.attempts == 2
+    assert len(prompts) == 2
+    assert "not valid Python" in prompts[1]
+
+
+def test_langgraph_stops_after_bounded_retry_limit():
+    calls = []
+
+    def model(_prompt):
+        calls.append(1)
+        return "not python"
+
+    with pytest.raises(GenerationError, match=f"after {MAX_GENERATION_ATTEMPTS} attempts"):
+        generate_tests("add two numbers", SOURCE, "calculator.py", model_generator=model)
+    assert len(calls) == MAX_GENERATION_ATTEMPTS
+
+
+def test_missing_gemini_configuration_is_reported(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with pytest.raises(GenerationError, match="GEMINI_API_KEY"):
+        generate_tests("add two numbers", SOURCE, "calculator.py")

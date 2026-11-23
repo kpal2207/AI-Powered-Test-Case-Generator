@@ -1,0 +1,23 @@
+[
+  {
+    "id": "integer_addition",
+    "feature_description": "add returns the sum of two integer inputs, including negative numbers and zero",
+    "source_filename": "calculator.py",
+    "source_code": "def add(left, right):\n    return left + right\n",
+    "mutant_source_code": "def add(left, right):\n    return left - right\n"
+  },
+  {
+    "id": "safe_division",
+    "feature_description": "safe_divide returns numerator divided by denominator, and raises ValueError when the denominator is zero",
+    "source_filename": "division.py",
+    "source_code": "def safe_divide(numerator, denominator):\n    if denominator == 0:\n        raise ValueError('denominator cannot be zero')\n    return numerator / denominator\n",
+    "mutant_source_code": "def safe_divide(numerator, denominator):\n    return numerator / denominator\n"
+  },
+  {
+    "id": "normalize_username",
+    "feature_description": "normalize_username trims surrounding whitespace and converts a username to lowercase",
+    "source_filename": "users.py",
+    "source_code": "def normalize_username(username):\n    return username.strip().lower()\n",
+    "mutant_source_code": "def normalize_username(username):\n    return username.strip()\n"
+  }
+]

@@ -47,7 +47,7 @@ def generate(request: GenerateRequest) -> dict[str, str]:
     try:
         result = generate_tests(request.feature_description, request.source_code, request.source_filename)
     except GenerationError as exc:
-        status = 503 if "OPENAI_API_KEY" in str(exc) or "OPENAI_MODEL" in str(exc) else 502
+        status = 503 if "GEMINI_API_KEY" in str(exc) or "GEMINI_MODEL" in str(exc) else 502
         raise HTTPException(status_code=status, detail=str(exc)) from exc
     return {"filename": result.filename, "test_code": result.code}
 

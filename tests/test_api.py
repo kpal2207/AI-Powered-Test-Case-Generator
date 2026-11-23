@@ -39,12 +39,12 @@ def test_generate_endpoint_rejects_bad_source(monkeypatch):
 
 def test_generate_endpoint_reports_missing_configuration(monkeypatch):
     def fail(*_args):
-        raise GenerationError("Set OPENAI_API_KEY in your local .env file before generating tests.")
+        raise GenerationError("Set GEMINI_API_KEY in your local .env file before generating tests.")
 
     monkeypatch.setattr(main, "generate_tests", fail)
     response = client.post("/api/generate", json=valid_generate_payload())
     assert response.status_code == 503
-    assert "OPENAI_API_KEY" in response.json()["detail"]
+    assert "GEMINI_API_KEY" in response.json()["detail"]
 
 
 def test_run_endpoint_returns_results(monkeypatch):
