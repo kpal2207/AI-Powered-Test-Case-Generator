@@ -74,7 +74,7 @@ Try changing one part at a time: first ask for boundary cases, then add an edge-
 Run unit and API tests:
 
 ```bash
-pytest -q
+python -m pytest -q
 ```
 
 Run Docker integration checks (after building the runner image):

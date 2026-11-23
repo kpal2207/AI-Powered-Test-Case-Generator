@@ -136,7 +136,7 @@ def generate_tests(
 ) -> GeneratedTests:
     """Call the Responses API, then normalize and validate its output."""
     source_filename = validate_generation_input(feature_description, source_code, source_filename)
-    model = os.getenv("OPENAI_MODEL", "gpt-6-astra").strip()
+    model = os.getenv("OPENAI_MODEL", "gpt-6.2-sol").strip()
     if not model:
         raise GenerationError("Set OPENAI_MODEL to a model available to your API account.")
     if client is None:
