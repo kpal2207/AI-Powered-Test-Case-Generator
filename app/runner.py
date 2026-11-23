@@ -36,6 +36,15 @@ class TestRunResult:
 
 
 def _docker_command(workdir: Path, image: str, container_name: str) -> list[str]:
+    # The temporary bind mount is intentionally private to the host user
+    # (0700). Match that unprivileged UID/GID inside Linux containers so the
+    # runner can read it without making submitted code world-readable.
+    uid = os.getuid() if hasattr(os, "getuid") else 65532
+    gid = os.getgid() if hasattr(os, "getgid") else 65532
+    if uid == 0:
+        # Avoid running generated code as root if the API itself was started
+        # as root; the caller below adjusts access only for this rare case.
+        uid, gid = 65532, 65532
     return [
         "docker",
         "run",
@@ -49,7 +58,7 @@ def _docker_command(workdir: Path, image: str, container_name: str) -> list[str]
         "--pids-limit=64",
         "--memory=256m",
         "--cpus=0.5",
-        "--user=65532:65532",
+        f"--user={uid}:{gid}",
         "--tmpfs=/tmp:rw,noexec,nosuid,size=32m",
         "--volume",
         f"{workdir}:/workspace:ro",
@@ -104,6 +113,10 @@ def run_generated_tests(
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="ai-test-run-") as temp_dir:
         directory = Path(temp_dir)
+        if hasattr(os, "getuid") and os.getuid() == 0:
+            # Root-created temporary directories are traversable by the
+            # dedicated non-root runner; the mount remains read-only.
+            directory.chmod(0o755)
         (directory / source_filename).write_text(source_code, encoding="utf-8")
         (directory / "test_generated.py").write_text(test_code, encoding="utf-8")
         command = _docker_command(directory, image, container_name)
